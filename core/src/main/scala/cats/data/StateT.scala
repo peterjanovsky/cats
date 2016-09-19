@@ -8,16 +8,64 @@ import cats.syntax.either._
  * argument and produces an `A` value wrapped in `F`. However, it also produces
  * an `S` value representing the updated state (which is wrapped in the `F`
  * context along with the `A` value.
+ *
+ * parameters
+ *  funF: F[S => F[(S,A)]] (higher-kinded type F of function S to higher-kinded type F of tuple (S,A))
  */
 final class StateT[F[_], S, A](val runF: F[S => F[(S, A)]]) extends Serializable {
 
-  def flatMap[B](fas: A => StateT[F, S, B])(implicit F: Monad[F]): StateT[F, S, B] =
-    StateT(s =>
+  /**
+   * parameters
+   *  fas: function from A to StateT[F, S, B]
+   * implicits
+   *  F: Monad[F]
+   */
+  def flatMap[B](fas: A => StateT[F, S, B])(implicit F: Monad[F]): StateT[F, S, B] = {
+    /**
+     * leverages StateT#apply, defined as
+     *  parameters
+     *    f: function from S to F[(S,A)] (higher-kinded type F of tuple (S,A))
+     *  implicits
+     *    F: Applicative[F]
+     *  def apply[F[_], S, A](f: S => F[(S, A)])(implicit F: Applicative[F]): StateT[F, S, A] =
+     *    new StateT(F.pure(f))
+     *
+     *    where F.pure lifts the function S => F[(S,A)] into the Applicative Functor
+     *      where if pure defined, it is declared here
+     *        trait Applicative[F[_]] extends Apply[F]
+     *      StateT#apply expects an implicit Applicative is within scope as it utilizes the Applicative#pure
+     *        which Applicative is within scope when utilizing StateT
+     *        we leverage the Monad typeclass extending the FlatMap typeclass below for access to FlatMap#flatMap
+     *        do we need to utilize containers which have extended the Monad typeclass, providing definitions of
+     *        Applicative#pure and FlatMap#flatMap for StateT to compile
+     */
+    StateT(s => // s within this context is of type S as defined within StateT#apply
+      /**
+       * leverages Monad#flatMap, defined as
+       *  parameters
+       *    fa: F[A] (higher-kinded type F of A)
+       *    f: function from A to F[B] (higher-kinded F of B)
+       *  def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B]
+       *
+       *    where function parameters
+       *      fa utilizes StateT class parameter runF, defined as
+       *        F[S => F[(S,A)]], thus F[A] is equal to F[S => F[(S,A)]]
+       *      f utilizes function fsf, defined as
+       *        A => F[B]
+       *          applying function fsf to value s provides result of F[A]
+       *
+       * where is flatMap defined, as the following do not provide the definition
+       *  trait Monad[F[_]] extends FlatMap[F] with Applicative[F]
+       *  trait FlatMap[F[_]] extends Apply[F] (contains flatMap function declaration)
+       *  trait Applicative[F[_]] extends Apply[F]
+       *  trait Apply[F[_]] extends Functor[F] with Cartesian[F] with ApplyArityFunctions[F] 
+       */
       F.flatMap(runF) { fsf =>
         F.flatMap(fsf(s)) { case (s, a) =>
           fas(a).run(s)
         }
       })
+  }
 
   def flatMapF[B](faf: A => F[B])(implicit F: Monad[F]): StateT[F, S, B] =
     StateT(s =>
