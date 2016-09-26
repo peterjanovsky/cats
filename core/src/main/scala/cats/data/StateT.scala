@@ -67,6 +67,25 @@ final class StateT[F[_], S, A](val runF: F[S => F[(S, A)]]) extends Serializable
       })
   }
 
+  def flatMap2[B](fas: A => StateT[F, S, B])(implicit F: Monad[F]): StateT[F, S, B] = {
+    val stateT: StateT[F, S, B] = StateT( (s: S) => {
+      // flatMap function parameter defined as F[A], here A is the function S => F[(S,A)]
+      val func: F[S => F[(S, A)]] = runF
+      val res: F[(S,B)] = F.flatMap(func) { fsf => {
+        // flatMap function parameter defined as F[A], here A is the tuple (S,A)
+        val innerFunc: F[(S,A)] = fsf(s)
+        val innerRes: F[(S,B)] = F.flatMap(innerFunc) { case (s, a) => {
+          val stateT: StateT[F, S, B] = fas(a)
+          val tuple: F[(S,B)] = stateT.run(s)
+          tuple
+        } }
+        innerRes
+      } }
+      res
+    } )
+    stateT
+  }
+
   def flatMapF[B](faf: A => F[B])(implicit F: Monad[F]): StateT[F, S, B] =
     StateT(s =>
       F.flatMap(runF) { fsf =>
